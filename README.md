@@ -8,10 +8,11 @@ First-party extension on the **marketplace** (`tickets`): install it from Extens
 ## Enabling and settings
 The Extensions view lists **Tickets**; use *this world* to switch it on. Its **Settings** button opens *Settings → Extensions → Tickets*, a sub-page with no hub tile of its own. It has these settings per module:
 
-- **Show panel**: `off`, `auto` (the default: the panel appears in Views when the game first sends data or when the role is staff), or `on`.
+- **Show panel**: `off`, `auto` (the panel appears in Views when the game first sends data or when the role is staff), or `on`. Tickets defaults to `auto` (and stays out of Views until `Client.Tickets.Role {staff:true}`); My tickets defaults to `on`, as Underspire lists My Tickets for every player.
 - **Driven by**: `gmcp`, `api` or `both`.
 - One *via* and one *command* row per action. `via` is `command`, `gmcp`, `ext` or `none`. Commands are templates such as `@ticket {short_id}`, where a `[… {text}]` segment is dropped when its placeholder is empty.
 - The world-scoped **empty hint** for My tickets.
+- **Read @tickets output** (My tickets, on by default): the text bridge below.
 
 While a module is on, `Core.Supports.Add ["Client.Tickets 1"]` goes to every connected session of the world, and `Remove` follows once both modules are off.
 
@@ -43,6 +44,11 @@ Default actions:
 | deny | `@deny {short_id}[ = {text}]` |
 | reply | `@ticket {short_id} = {text}` |
 | myreply | `@ticket {short_id} = {text}` |
+
+## Without GMCP: the text bridge (1.2)
+Underspire's telnet port (and any game built the same way) sends no `Client.Tickets.*` at all; its tickets live in text: `@tickets` opens an interactive menu (`N:` rows, `f` toggles the finished list, `n`/`p` page, `q` quits) and `@ticket <id>` prints one thread. My tickets covers that itself. When `Client.Tickets.Mine` or `.MyGet` goes unanswered for 1.5 s (or GMCP cannot be sent at all) it types the command, walks the menu, parses the rows or the thread, and gags every line it caused, its own echoes included. A line it does not recognise is left in the terminal, so a game with another format loses nothing. It maps `Bug Report`/`Puppet Request`/`Player Request`/`Chargen Application` to the kinds `bug`/`puppet`/`request`/`chargen`, `with staff` to `pending`, `waiting on you` to `waiting`, and `2d`/`3h`/`12m` ages to minutes. The player reply is `@ticket {id} = {text}` (the bare id; Underspire rejects `#id`), and after a reply sent as a command the thread is re-read. Switch it off with **Read @tickets output**. The parsers are in `src/text.ts`, with tests over captured output in `tests/`.
+
+The staff queue has no text bridge: Underspire's staff commands were not captured. Drive it through the API instead (§ below), or ask the game for GMCP.
 
 ## API (`ctx.api('tickets')`, types `@runmu.sh/ext-tickets/types`)
 ```ts

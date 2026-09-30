@@ -5,6 +5,8 @@
  * GMCP in: Client.Tickets.Role / Inbox / History / Thread / Message / Alert / BugDetail / Mine / MyThread.
  * GMCP out (data requests, or actions whose `via` is gmcp): Client.Tickets.Get / List / BugDetail /
  * Action / Mine / MyGet. Buttons run the configured actions (default: the Underspire commands).
+ * Without GMCP, My tickets reads the game's `@tickets` / `@ticket <id>` text instead (./text.ts and the
+ * text bridge below).
  * The value `activate` returns is the TicketsApi (types in ./types.ts) other extensions get with
  * `ctx.api('@runmu.sh/ext-tickets')`.
  */
@@ -14,9 +16,16 @@ import { MODULE_CSS } from '@runmu.sh/ext-kit/css';
 import { h, fill, age, clock, body, hint, plateCls, replyArea } from '@runmu.sh/ext-kit/dom';
 import type { Schema } from '@runmu.sh/ext-kit/schema';
 import type { Message, Ticket, TicketsApi, MyTicketsApi } from './types';
+import { LIST_HEAD, MENU_END, MENU_NEXT, MENU_NOISE, feedThread, parseRow, threadParse, type ThreadParse } from './text';
 
 const P = 'Client.Tickets';
 const DEFAULT_HINT = '`@request subject = what you need`, `@bug` or `@puppetrequest` in the game to open one.';
+/** How long a GMCP data request may go unanswered before the text bridge asks the game in words. */
+const GMCP_GRACE_MS = 1500;
+/** The text bridge gives up on a menu (and sends its quit key) after this long. */
+const TEXT_TIMEOUT_MS = 6000;
+const MENU_LINE = /^\s*([a-z]|\d+): /;
+const OPEN_STATUS = /^(pending|waiting|open|claimed)$/;
 
 // ─── payload schemas (06 §2 Types) ───────────────────────────────────────────────────────────────
 const msgS: Schema = { type: 'object', properties: { text: { type: 'string' }, html: { type: 'string' }, sender: { type: 'string' }, visibility: { type: 'string' }, origin: { type: 'string' }, ts: { type: ['number', 'string'] } } };
@@ -75,11 +84,15 @@ export default defineExtension({
       gmcpAction: (a, v) => (a === 'open' ? [`${P}.Get`, { id: v.id }] : [`${P}.Action`, { action: a === 'reply_note' ? 'reply' : a, id: v.id, ...(v.text ? { text: v.text } : {}), ...(v.internal ? { internal: true } : {}) }]),
       options: [{ key: 'rich', label: 'Rich text in messages', default: false, kind: 'toggle', scope: 'both' }],
     });
+    // Underspire lists My Tickets in Views for everyone (only the staff queue is gated), so it is `on`.
     const mine = new WorldModule(mu, {
-      key: 'mytickets', title: 'My tickets', panels: ['mytickets'], pkg: P,
-      actions: { myreply: { label: 'Reply', via: 'command', cmd: '@ticket {short_id} = {text}' } },
+      key: 'mytickets', title: 'My tickets', panels: ['mytickets'], pkg: P, defaultMode: 'on',
+      actions: { myreply: { label: 'Reply', via: 'command', cmd: '@ticket {id} = {text}' } },
       gmcpAction: (_a, v) => [`${P}.Action`, { action: 'reply', id: v.id, text: v.text }],
-      options: [{ key: 'emptyHint', label: 'Empty-list hint', default: DEFAULT_HINT, kind: 'text', hint: 'wrap commands in `backticks`', scope: 'both' }],
+      options: [
+        { key: 'emptyHint', label: 'Empty-list hint', default: DEFAULT_HINT, kind: 'text', hint: 'wrap commands in `backticks`', scope: 'both' },
+        { key: 'text', label: 'Read @tickets output', default: true, kind: 'toggle', hint: 'when the game has no Client.Tickets GMCP: ask with @tickets / @ticket <id>, parse the text and hide it', scope: 'both' },
+      ],
     });
 
     mu.ui.style(MODULE_CSS);
@@ -151,14 +164,115 @@ export default defineExtension({
         case 'Message': pushMessage(sid, d); break;
         case 'Alert': if (S(sid).role) alert(d); break;
         case 'BugDetail': { const t = S(sid).threads.get(String(d.id)); if (t) { t.bug = d.bug; redraw(); } break; }
-        case 'Mine': setMine(sid, d.tickets, !!d.closed); break;
-        case 'MyThread': setMyThread(sid, d); break;
+        case 'Mine': settle(sid, 'mine', !!d.closed); setMine(sid, d.tickets, !!d.closed); break;
+        case 'MyThread': settle(sid, 'thread', false, String(d.id)); setMyThread(sid, d); break;
       }
     };
     mu.gmcp.on(P, (data, { sid, pkg }) => handle(pkg, data, sid));
     // Role and the lists are state: replay what arrived before this extension was enabled.
     replay(mu, ['Role', 'Inbox', 'Mine'].map((s) => `${P}.${s}`), (pkg, data, sid) => handle(pkg, data, sid));
 
+    // My tickets view state (per session), used by the panel and the text bridge below.
+    const myViews = new Map<string, { closed: boolean; open: string | null; draft: string; fb: Fb }>();
+    const myViewOf = (sid: string) => myViews.get(sid) ?? myViews.set(sid, { closed: false, open: null, draft: '', fb: null }).get(sid)!;
+
+    // ─── text bridge (My tickets without GMCP) ───────────────────────────────────────────────
+    // A game that never answers Client.Tickets.Mine / MyGet (Underspire's telnet port is one) still has
+    // `@tickets` (an interactive menu) and `@ticket <id>`. When a GMCP request goes unanswered for
+    // GMCP_GRACE_MS, or GMCP cannot be sent at all, the bridge sends the command, walks the menu
+    // (`f` for the finished list, `n` for its next pages, `q` to leave), parses the rows or the thread
+    // (./text.ts) and gags every line it caused, including its own echoes. A line it does not
+    // recognise is left alone, so a game with another format shows its text as before.
+    // Off with the setting `mytickets.text`.
+    type Phase = 'sent' | 'open' | 'finished' | 'done';
+    interface TextJob { kind: 'mine' | 'thread'; closed: boolean; id?: string; rows: Ticket[]; phase: Phase; hasNext: boolean; sawList: boolean; th: ThreadParse; timer: ReturnType<typeof setTimeout> }
+    const textJobs = new Map<string, TextJob>();
+    const textQueue = new Map<string, Array<() => void>>();
+    /** Commands the bridge typed whose echo has not shown yet (per session; it outlives the job: `q` echoes after it closed). */
+    const echoes = new Map<string, Set<string>>();
+    const pending = new Map<string, ReturnType<typeof setTimeout>>();
+    const textOn = (sid: string) => mine.option<boolean>('text', sid) !== false && mine.source(mine.worldOf(sid)) !== 'api';
+    const pendKey = (sid: string, kind: TextJob['kind'], closed: boolean, id?: string) => `${sid}\u0000${kind}\u0000${kind === 'mine' ? closed : id}`;
+    const settle = (sid: string, kind: TextJob['kind'], closed: boolean, id?: string) => { const k = pendKey(sid, kind, closed, id); const t = pending.get(k); if (t) { clearTimeout(t); pending.delete(k); } };
+    const say = (sid: string, cmd: string) => { (echoes.get(sid) ?? echoes.set(sid, new Set()).get(sid)!).add(cmd); void mu.sessions.send(cmd, sid); };
+    const finishJob = (sid: string, ok: boolean) => {
+      const j = textJobs.get(sid);
+      if (!j) return;
+      clearTimeout(j.timer);
+      textJobs.delete(sid);
+      if (j.phase === 'open' || j.phase === 'finished') say(sid, 'q');
+      if (j.kind === 'mine') {
+        if (ok || j.sawList) {
+          // The finished list holds the open ones too; the panel's Closed tab wants only the closed.
+          setMine(sid, j.closed ? j.rows.filter((t) => !OPEN_STATUS.test(t.status ?? '')) : j.rows, j.closed);
+        } else { M(sid).error = true; redraw(); }
+      } else if (j.th.t && !j.th.error) setMyThread(sid, j.th.t);
+      else if (!ok || j.th.error) { const v = myViewOf(sid); if (v.open === j.id) v.fb = { ok: false, text: j.th.error ? `No ticket ${j.id}.` : 'The game did not answer.' }; redraw(); }
+      textQueue.get(sid)?.shift()?.();
+    };
+    const startJob = (sid: string, kind: TextJob['kind'], closed: boolean, id?: string) => {
+      if (textJobs.has(sid)) { (textQueue.get(sid) ?? textQueue.set(sid, []).get(sid)!).push(() => startJob(sid, kind, closed, id)); return; }
+      const j: TextJob = { kind, closed, id, rows: [], phase: 'sent', hasNext: false, sawList: false, th: threadParse(), timer: setTimeout(() => finishJob(sid, false), TEXT_TIMEOUT_MS) };
+      textJobs.set(sid, j);
+      say(sid, kind === 'mine' ? '@tickets' : `@ticket ${id}`);
+    };
+    /** After a GMCP data request: ask in text unless an answer arrives in time. */
+    const requestData = (a: Record<string, unknown>, sid: string, kind: TextJob['kind'], closed: boolean, id?: string) => {
+      const pkg = kind === 'mine' ? `${P}.Mine` : `${P}.MyGet`;
+      void mu.gmcp.send(pkg, a, sid).then((sent) => {
+        if (!textOn(sid)) return;
+        if (!sent) { startJob(sid, kind, closed, id); return; }
+        const k = pendKey(sid, kind, closed, id);
+        settle(sid, kind, closed, id);
+        pending.set(k, setTimeout(() => { pending.delete(k); startJob(sid, kind, closed, id); }, GMCP_GRACE_MS));
+      });
+    };
+    mine.onRequest('mine', (a, s) => requestData(a, s.sid, 'mine', !!a.closed));
+    mine.onRequest('myget', (a, s) => requestData(a, s.sid, 'thread', false, String(a.id)));
+    const charName = (sid: string) => String((mu.gmcp.state('Char.Name', sid) as any)?.name ?? (mu.gmcp.state('Player.Context', sid) as any)?.character ?? '');
+    const menuStage = (j: TextJob, sid: string, text: string, gag: () => void) => {
+      if (LIST_HEAD.test(text)) {
+        j.sawList = true; gag();
+        j.phase = /FINISHED/.test(text) ? 'finished' : 'open';
+        return;
+      }
+      if (j.phase === 'sent') { if (text === '' || MENU_NOISE.test(text)) gag(); return; }
+      if (text === '' || MENU_NOISE.test(text)) { gag(); return; }
+      const row = parseRow(text);
+      if (row) { if (!j.rows.some((t) => t.id === row.id)) j.rows.push(row); gag(); return; }
+      if (MENU_NEXT.test(text)) { j.hasNext = true; gag(); return; }
+      if (MENU_END.test(text)) {
+        gag();
+        if (j.closed && j.phase === 'open') { j.rows = []; j.hasNext = false; say(sid, 'f'); return; }
+        if (j.closed && j.hasNext) { j.hasNext = false; say(sid, 'n'); return; }
+        say(sid, 'q'); j.phase = 'done';
+        finishJob(sid, true);
+        return;
+      }
+      if (MENU_LINE.test(text)) gag(); // s:, f:, p:, c: and any other key we do not press
+    };
+    ctx.subscriptions.push(mu.lines.stage({
+      id: 'mytickets-text', order: 300,
+      run(line, c) {
+        const text = line.text.replace(/\s+$/, '');
+        if (line.kind === 'echo') { const e = echoes.get(c.sid); if (e?.has(text)) { e.delete(text); c.gag(); } return; }
+        const j = textJobs.get(c.sid);
+        if (!j || line.kind !== 'output') return;
+        if (j.kind === 'mine') { menuStage(j, c.sid, text, c.gag); return; }
+        if (!feedThread(j.th, text, charName(c.sid))) return;
+        c.gag();
+        if (!j.th.done) return;
+        // The `(Withdraw it with …)` tail may still follow; give it a moment.
+        clearTimeout(j.timer);
+        j.timer = setTimeout(() => finishJob(c.sid, !j.th.error), 150);
+      },
+    }));
+    ctx.subscriptions.push(() => {
+      for (const t of pending.values()) clearTimeout(t);
+      pending.clear();
+      for (const j of textJobs.values()) clearTimeout(j.timer);
+      textJobs.clear(); textQueue.clear(); echoes.clear();
+    });
 
     // ─── Tickets panel ───────────────────────────────────────────────────────────────────────
     const views = new Map<string, { tab: 'open' | 'history'; kinds: Set<string>; open: string | null; bug: boolean; draft: string; note: boolean; fb: Fb }>();
@@ -302,8 +416,6 @@ export default defineExtension({
     }
 
     // ─── My tickets panel ────────────────────────────────────────────────────────────────────
-    const myViews = new Map<string, { closed: boolean; open: string | null; draft: string; fb: Fb }>();
-    const myViewOf = (sid: string) => myViews.get(sid) ?? myViews.set(sid, { closed: false, open: null, draft: '', fb: null }).get(sid)!;
     const loadMine = (sid: string, closed: boolean) => {
       M(sid).error = false;
       void mine.request('mine', `${P}.Mine`, { closed }, sid);
@@ -351,7 +463,12 @@ export default defineExtension({
                     const input = (e.currentTarget as HTMLFormElement).querySelector('textarea')!;
                     const text = input.value.trim();
                     if (!text) return;
-                    try { v.fb = feedback(await mine.run('myreply', { id, short_id: short, text }, sid), 'myreply', short); } catch (err) { v.fb = failed(err); }
+                    try {
+                      const r = await mine.run('myreply', { id, short_id: short, text }, sid);
+                      v.fb = feedback(r, 'myreply', short);
+                      // A game without Client.Tickets.Message pushes nothing back: re-read the thread.
+                      if (r === 'command' && textOn(sid)) setTimeout(() => { if (v.open === id) void mine.request('myget', `${P}.MyGet`, { id }, sid); }, 600);
+                    } catch (err) { v.fb = failed(err); }
                     input.value = ''; v.draft = '';
                     draw();
                   },

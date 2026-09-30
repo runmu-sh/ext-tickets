@@ -1,7 +1,7 @@
 {
   "name": "@runmu.sh/ext-tickets",
-  "version": "1.1.1",
-  "description": "The staff ticket queue and the player's own tickets (My tickets), driven by GMCP Client.Tickets.* or by another extension through its API.",
+  "version": "1.2.0",
+  "description": "The staff ticket queue and the player's own tickets (My tickets), driven by GMCP Client.Tickets.*, by another extension through its API, or (My tickets) by parsing the game's @tickets text.",
   "keywords": [
     "tickets",
     "staff",
@@ -25,13 +25,15 @@
     "dist",
     "src/types.ts",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "src/text.ts"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/dev.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "node scripts/build.mjs --check"
+    "check": "node scripts/build.mjs --check",
+    "test": "node --experimental-strip-types --test \"tests/*.test.mjs\""
   },
   "devDependencies": {
     "@muclient/sdk": "npm:@runmu.sh/sdk@^1.6.0",
@@ -48,7 +50,7 @@
     "api": "^1.5",
     "source": "src/index.ts",
     "displayName": "Tickets",
-    "description": "The staff ticket queue and the player's own tickets (My tickets), driven by GMCP Client.Tickets.* or by another extension through its API.",
+    "description": "The staff ticket queue and the player's own tickets (My tickets), driven by GMCP Client.Tickets.*, by another extension through its API, or (My tickets) by parsing the game's @tickets text.",
     "categories": [
       "interface",
       "communication"

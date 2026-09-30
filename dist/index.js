@@ -611,9 +611,117 @@ function replyArea(props) {
   return ta;
 }
 
+// src/text.ts
+var ROW = /^\s*\d+: (.+?) #([0-9a-zA-Z]+) \((.+?) \. (\S+) \. (.*)\)\s*$/;
+var LIST_HEAD = /^=== YOUR (OPEN|FINISHED|REQUESTS MATCHING)\b.* ===$/;
+var THREAD_HEAD = /^\[(.+?) #([0-9a-zA-Z]+)\](?: (.*))?$/;
+var THREAD_STATUS = /^\s*Status: (.+?) \. (?:updated|last activity) (\S+) ago\s*$/;
+var MSG = /^\s*\[(\S+?)\] (.+?): (.*)$/;
+var SYS = /^\s*\[(\S+?)\] -- (.*)$/;
+var THREAD_END = /^\(Reply with @ticket /;
+var THREAD_TAIL = /^\(Withdraw it with /;
+var MENU_END = /^\s*q: Quit\s*$/;
+var MENU_NEXT = /^\s*n: Next page\s*$/;
+var MENU_NOISE = /^(Invalid option\. Try again\.|Choose a (finished )?request .*|Nothing of yours matches .*|Search your requests: .*)$/;
+var NO_TICKET = /^(No ticket with that id\.|Usage: @ticket .*)$/;
+function kindOf(label) {
+  const l = label.toLowerCase();
+  if (/\bbug\b/.test(l)) return "bug";
+  if (/\bpuppet\b/.test(l)) return "puppet";
+  if (/\bconduct\b|\breport\b/.test(l)) return "report";
+  if (/\bchargen\b|\bapplication\b/.test(l)) return "chargen";
+  return "request";
+}
+function statusOf(text) {
+  const s = text.trim().toLowerCase();
+  if (s === "with staff" || s === "pending" || s === "open") return "pending";
+  if (s.startsWith("waiting")) return "waiting";
+  if (s === "resolved") return "closed";
+  return s.replace(/\s+/g, "_");
+}
+function ageMins(s) {
+  const m = /^(\d+)([mhd])$/.exec(s.trim());
+  if (!m) return s.trim() === "now" ? 0 : void 0;
+  const n = +m[1];
+  return m[2] === "d" ? n * 1440 : m[2] === "h" ? n * 60 : n;
+}
+function parseRow(line) {
+  const m = ROW.exec(line);
+  if (!m) return null;
+  const [, label, id, status, age2, subject] = m;
+  const t = { id, short_id: `#${id}`, kind: kindOf(label), label, status: statusOf(status), age_mins: ageMins(age2) };
+  if (subject) t.subject = subject;
+  return t;
+}
+var threadParse = () => ({ t: null, me: "", done: false, error: false });
+function feedThread(p, line, me) {
+  if (p.done) return THREAD_TAIL.test(line);
+  if (!p.t) {
+    if (NO_TICKET.test(line)) {
+      p.error = true;
+      p.done = true;
+      return true;
+    }
+    const h2 = THREAD_HEAD.exec(line);
+    if (!h2) return false;
+    p.t = { id: h2[2], short_id: `#${h2[2]}`, kind: kindOf(h2[1]), label: h2[1], messages: [] };
+    if (h2[3]) p.t.subject = h2[3];
+    return true;
+  }
+  const t = p.t, msgs = t.messages;
+  if (THREAD_END.test(line)) {
+    p.done = true;
+    finish(t, p.me || me);
+    return true;
+  }
+  const st = THREAD_STATUS.exec(line);
+  if (st && !msgs.length) {
+    t.status = statusOf(st[1]);
+    t.age_mins = ageMins(st[2]);
+    return true;
+  }
+  const sys = SYS.exec(line);
+  if (sys) {
+    msgs.push({ origin: "system", text: sys[2], sender: "" });
+    return true;
+  }
+  const m = MSG.exec(line);
+  if (m) {
+    let sender = m[2], origin;
+    const tag = /^(.*?) \((you|staff)\)$/.exec(sender);
+    if (tag) {
+      sender = tag[1];
+      origin = tag[2] === "you" ? "player" : "staff";
+      if (tag[2] === "you") p.me = sender;
+    }
+    if (!origin) origin = sender === (p.me || me) ? "player" : void 0;
+    const msg = { sender, text: m[3] };
+    if (origin) msg.origin = origin;
+    msgs.push(msg);
+    return true;
+  }
+  const last = msgs[msgs.length - 1];
+  if (last && last.origin !== "system") last.text = `${last.text ?? ""}
+${line}`;
+  return true;
+}
+function finish(t, me) {
+  const msgs = t.messages ?? [];
+  const requester = msgs.find((m) => m.origin === "player")?.sender || me || msgs.find((m) => m.origin !== "system")?.sender || "";
+  for (const m of msgs) {
+    if (m.text) m.text = m.text.replace(/\n+$/, "");
+    if (!m.origin) m.origin = requester && m.sender === requester ? "player" : "staff";
+  }
+  if (requester && !t.requester_name) t.requester_name = requester;
+}
+
 // src/index.ts
 var P = "Client.Tickets";
 var DEFAULT_HINT = "`@request subject = what you need`, `@bug` or `@puppetrequest` in the game to open one.";
+var GMCP_GRACE_MS = 1500;
+var TEXT_TIMEOUT_MS = 6e3;
+var MENU_LINE = /^\s*([a-z]|\d+): /;
+var OPEN_STATUS = /^(pending|waiting|open|claimed)$/;
 var msgS = { type: "object", properties: { text: { type: "string" }, html: { type: "string" }, sender: { type: "string" }, visibility: { type: "string" }, origin: { type: "string" }, ts: { type: ["number", "string"] } } };
 var ticketS = {
   type: "object",
@@ -689,9 +797,13 @@ var index_default = defineExtension({
       title: "My tickets",
       panels: ["mytickets"],
       pkg: P,
-      actions: { myreply: { label: "Reply", via: "command", cmd: "@ticket {short_id} = {text}" } },
+      defaultMode: "on",
+      actions: { myreply: { label: "Reply", via: "command", cmd: "@ticket {id} = {text}" } },
       gmcpAction: (_a, v) => [`${P}.Action`, { action: "reply", id: v.id, text: v.text }],
-      options: [{ key: "emptyHint", label: "Empty-list hint", default: DEFAULT_HINT, kind: "text", hint: "wrap commands in `backticks`", scope: "both" }]
+      options: [
+        { key: "emptyHint", label: "Empty-list hint", default: DEFAULT_HINT, kind: "text", hint: "wrap commands in `backticks`", scope: "both" },
+        { key: "text", label: "Read @tickets output", default: true, kind: "toggle", hint: "when the game has no Client.Tickets GMCP: ask with @tickets / @ticket <id>, parse the text and hide it", scope: "both" }
+      ]
     });
     mu.ui.style(MODULE_CSS);
     mu.settings.define({ title: "Tickets", items: [...tickets.settingItems(), ...mine.settingItems()] });
@@ -794,15 +906,166 @@ var index_default = defineExtension({
           break;
         }
         case "Mine":
+          settle(sid, "mine", !!d.closed);
           setMine(sid, d.tickets, !!d.closed);
           break;
         case "MyThread":
+          settle(sid, "thread", false, String(d.id));
           setMyThread(sid, d);
           break;
       }
     };
     mu.gmcp.on(P, (data, { sid, pkg }) => handle(pkg, data, sid));
     replay(mu, ["Role", "Inbox", "Mine"].map((s) => `${P}.${s}`), (pkg, data, sid) => handle(pkg, data, sid));
+    const myViews = /* @__PURE__ */ new Map();
+    const myViewOf = (sid) => myViews.get(sid) ?? myViews.set(sid, { closed: false, open: null, draft: "", fb: null }).get(sid);
+    const textJobs = /* @__PURE__ */ new Map();
+    const textQueue = /* @__PURE__ */ new Map();
+    const echoes = /* @__PURE__ */ new Map();
+    const pending = /* @__PURE__ */ new Map();
+    const textOn = (sid) => mine.option("text", sid) !== false && mine.source(mine.worldOf(sid)) !== "api";
+    const pendKey = (sid, kind, closed, id) => `${sid}\0${kind}\0${kind === "mine" ? closed : id}`;
+    const settle = (sid, kind, closed, id) => {
+      const k = pendKey(sid, kind, closed, id);
+      const t = pending.get(k);
+      if (t) {
+        clearTimeout(t);
+        pending.delete(k);
+      }
+    };
+    const say = (sid, cmd) => {
+      (echoes.get(sid) ?? echoes.set(sid, /* @__PURE__ */ new Set()).get(sid)).add(cmd);
+      void mu.sessions.send(cmd, sid);
+    };
+    const finishJob = (sid, ok) => {
+      const j = textJobs.get(sid);
+      if (!j) return;
+      clearTimeout(j.timer);
+      textJobs.delete(sid);
+      if (j.phase === "open" || j.phase === "finished") say(sid, "q");
+      if (j.kind === "mine") {
+        if (ok || j.sawList) {
+          setMine(sid, j.closed ? j.rows.filter((t) => !OPEN_STATUS.test(t.status ?? "")) : j.rows, j.closed);
+        } else {
+          M(sid).error = true;
+          redraw();
+        }
+      } else if (j.th.t && !j.th.error) setMyThread(sid, j.th.t);
+      else if (!ok || j.th.error) {
+        const v = myViewOf(sid);
+        if (v.open === j.id) v.fb = { ok: false, text: j.th.error ? `No ticket ${j.id}.` : "The game did not answer." };
+        redraw();
+      }
+      textQueue.get(sid)?.shift()?.();
+    };
+    const startJob = (sid, kind, closed, id) => {
+      if (textJobs.has(sid)) {
+        (textQueue.get(sid) ?? textQueue.set(sid, []).get(sid)).push(() => startJob(sid, kind, closed, id));
+        return;
+      }
+      const j = { kind, closed, id, rows: [], phase: "sent", hasNext: false, sawList: false, th: threadParse(), timer: setTimeout(() => finishJob(sid, false), TEXT_TIMEOUT_MS) };
+      textJobs.set(sid, j);
+      say(sid, kind === "mine" ? "@tickets" : `@ticket ${id}`);
+    };
+    const requestData = (a, sid, kind, closed, id) => {
+      const pkg = kind === "mine" ? `${P}.Mine` : `${P}.MyGet`;
+      void mu.gmcp.send(pkg, a, sid).then((sent) => {
+        if (!textOn(sid)) return;
+        if (!sent) {
+          startJob(sid, kind, closed, id);
+          return;
+        }
+        const k = pendKey(sid, kind, closed, id);
+        settle(sid, kind, closed, id);
+        pending.set(k, setTimeout(() => {
+          pending.delete(k);
+          startJob(sid, kind, closed, id);
+        }, GMCP_GRACE_MS));
+      });
+    };
+    mine.onRequest("mine", (a, s) => requestData(a, s.sid, "mine", !!a.closed));
+    mine.onRequest("myget", (a, s) => requestData(a, s.sid, "thread", false, String(a.id)));
+    const charName = (sid) => String(mu.gmcp.state("Char.Name", sid)?.name ?? mu.gmcp.state("Player.Context", sid)?.character ?? "");
+    const menuStage = (j, sid, text, gag) => {
+      if (LIST_HEAD.test(text)) {
+        j.sawList = true;
+        gag();
+        j.phase = /FINISHED/.test(text) ? "finished" : "open";
+        return;
+      }
+      if (j.phase === "sent") {
+        if (text === "" || MENU_NOISE.test(text)) gag();
+        return;
+      }
+      if (text === "" || MENU_NOISE.test(text)) {
+        gag();
+        return;
+      }
+      const row = parseRow(text);
+      if (row) {
+        if (!j.rows.some((t) => t.id === row.id)) j.rows.push(row);
+        gag();
+        return;
+      }
+      if (MENU_NEXT.test(text)) {
+        j.hasNext = true;
+        gag();
+        return;
+      }
+      if (MENU_END.test(text)) {
+        gag();
+        if (j.closed && j.phase === "open") {
+          j.rows = [];
+          j.hasNext = false;
+          say(sid, "f");
+          return;
+        }
+        if (j.closed && j.hasNext) {
+          j.hasNext = false;
+          say(sid, "n");
+          return;
+        }
+        say(sid, "q");
+        j.phase = "done";
+        finishJob(sid, true);
+        return;
+      }
+      if (MENU_LINE.test(text)) gag();
+    };
+    ctx.subscriptions.push(mu.lines.stage({
+      id: "mytickets-text",
+      order: 300,
+      run(line, c) {
+        const text = line.text.replace(/\s+$/, "");
+        if (line.kind === "echo") {
+          const e = echoes.get(c.sid);
+          if (e?.has(text)) {
+            e.delete(text);
+            c.gag();
+          }
+          return;
+        }
+        const j = textJobs.get(c.sid);
+        if (!j || line.kind !== "output") return;
+        if (j.kind === "mine") {
+          menuStage(j, c.sid, text, c.gag);
+          return;
+        }
+        if (!feedThread(j.th, text, charName(c.sid))) return;
+        c.gag();
+        if (!j.th.done) return;
+        clearTimeout(j.timer);
+        j.timer = setTimeout(() => finishJob(c.sid, !j.th.error), 150);
+      }
+    }));
+    ctx.subscriptions.push(() => {
+      for (const t of pending.values()) clearTimeout(t);
+      pending.clear();
+      for (const j of textJobs.values()) clearTimeout(j.timer);
+      textJobs.clear();
+      textQueue.clear();
+      echoes.clear();
+    });
     const views = /* @__PURE__ */ new Map();
     const viewOf = (key) => views.get(key) ?? views.set(key, { tab: "open", kinds: /* @__PURE__ */ new Set(), open: null, bug: false, draft: "", note: false, fb: null }).get(key);
     function mountTickets(el, pc, panelId, fixedKinds) {
@@ -1057,8 +1320,6 @@ var index_default = defineExtension({
         el.replaceChildren();
       };
     }
-    const myViews = /* @__PURE__ */ new Map();
-    const myViewOf = (sid) => myViews.get(sid) ?? myViews.set(sid, { closed: false, open: null, draft: "", fb: null }).get(sid);
     const loadMine = (sid, closed) => {
       M(sid).error = false;
       void mine.request("mine", `${P}.Mine`, { closed }, sid);
@@ -1135,7 +1396,11 @@ var index_default = defineExtension({
                     const text = input.value.trim();
                     if (!text) return;
                     try {
-                      v.fb = feedback(await mine.run("myreply", { id, short_id: short, text }, sid2), "myreply", short);
+                      const r = await mine.run("myreply", { id, short_id: short, text }, sid2);
+                      v.fb = feedback(r, "myreply", short);
+                      if (r === "command" && textOn(sid2)) setTimeout(() => {
+                        if (v.open === id) void mine.request("myget", `${P}.MyGet`, { id }, sid2);
+                      }, 600);
                     } catch (err) {
                       v.fb = failed(err);
                     }
