@@ -1,6 +1,6 @@
 {
   "name": "@runmu.sh/ext-tickets",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "The staff ticket queue and the player's own tickets (My tickets), driven by GMCP Client.Tickets.*, by another extension through its API, or (My tickets) by parsing the game's @tickets text.",
   "keywords": [
     "tickets",

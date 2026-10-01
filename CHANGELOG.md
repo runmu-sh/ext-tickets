@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+
+- Fix: 1.2.0 failed to activate ("Cannot access 'settle' before initialization") in a session where `Client.Tickets.Mine` had already arrived, because the replay of stored packages ran before the text bridge was set up. Do not install 1.2.0.
+
 ## 1.2.0
 
 - **My tickets works on games without `Client.Tickets` GMCP** (Underspire's telnet port is one: it never sends the package, so the panel sat on "Loading" and, in `auto` mode, never appeared in Views). A text bridge asks `@tickets` / `@ticket <id>` when a GMCP request goes unanswered for 1.5 s or GMCP cannot be sent, walks the menu, parses the rows and threads (`src/text.ts`) and gags what it caused. New My tickets setting **Read @tickets output** (default on). Unit tests over the captured output in `tests/`.

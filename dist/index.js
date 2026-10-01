@@ -867,6 +867,16 @@ var index_default = defineExtension({
       redraw();
     };
     const alert = (a) => mu.ui.toast(`Unclaimed ${a.label ?? "ticket"}`, [a.who, a.age_mins !== void 0 ? `waiting ${age(a.age_mins)}` : ""].filter(Boolean).join(" \xB7 "), { kind: "tickets" });
+    const pending = /* @__PURE__ */ new Map();
+    const pendKey = (sid, kind, closed, id) => `${sid}\0${kind}\0${kind === "mine" ? closed : id}`;
+    const settle = (sid, kind, closed, id) => {
+      const k = pendKey(sid, kind, closed, id);
+      const t = pending.get(k);
+      if (t) {
+        clearTimeout(t);
+        pending.delete(k);
+      }
+    };
     const handle = (pkg, data, sid) => {
       const sub = pkg.slice(P.length + 1);
       const schema = SCHEMAS[sub];
@@ -922,17 +932,7 @@ var index_default = defineExtension({
     const textJobs = /* @__PURE__ */ new Map();
     const textQueue = /* @__PURE__ */ new Map();
     const echoes = /* @__PURE__ */ new Map();
-    const pending = /* @__PURE__ */ new Map();
     const textOn = (sid) => mine.option("text", sid) !== false && mine.source(mine.worldOf(sid)) !== "api";
-    const pendKey = (sid, kind, closed, id) => `${sid}\0${kind}\0${kind === "mine" ? closed : id}`;
-    const settle = (sid, kind, closed, id) => {
-      const k = pendKey(sid, kind, closed, id);
-      const t = pending.get(k);
-      if (t) {
-        clearTimeout(t);
-        pending.delete(k);
-      }
-    };
     const say = (sid, cmd) => {
       (echoes.get(sid) ?? echoes.set(sid, /* @__PURE__ */ new Set()).get(sid)).add(cmd);
       void mu.sessions.send(cmd, sid);

@@ -147,6 +147,12 @@ export default defineExtension({
     const alert = (a: { label?: string; who?: string; age_mins?: number }) =>
       mu.ui.toast(`Unclaimed ${a.label ?? 'ticket'}`, [a.who, a.age_mins !== undefined ? `waiting ${age(a.age_mins)}` : ''].filter(Boolean).join(' · '), { kind: 'tickets' });
 
+    // Text-bridge fallbacks armed by a GMCP data request (declared before `handle`: replay() calls it at once).
+    const pending = new Map<string, ReturnType<typeof setTimeout>>();
+    const pendKey = (sid: string, kind: 'mine' | 'thread', closed: boolean, id?: string) => `${sid}\u0000${kind}\u0000${kind === 'mine' ? closed : id}`;
+    /** A GMCP answer arrived: the text fallback for that request is no longer needed. */
+    const settle = (sid: string, kind: 'mine' | 'thread', closed: boolean, id?: string) => { const k = pendKey(sid, kind, closed, id); const t = pending.get(k); if (t) { clearTimeout(t); pending.delete(k); } };
+
     const handle = (pkg: string, data: unknown, sid: string) => {
       const sub = pkg.slice(P.length + 1);
       const schema = SCHEMAS[sub];
@@ -190,10 +196,7 @@ export default defineExtension({
     const textQueue = new Map<string, Array<() => void>>();
     /** Commands the bridge typed whose echo has not shown yet (per session; it outlives the job: `q` echoes after it closed). */
     const echoes = new Map<string, Set<string>>();
-    const pending = new Map<string, ReturnType<typeof setTimeout>>();
     const textOn = (sid: string) => mine.option<boolean>('text', sid) !== false && mine.source(mine.worldOf(sid)) !== 'api';
-    const pendKey = (sid: string, kind: TextJob['kind'], closed: boolean, id?: string) => `${sid}\u0000${kind}\u0000${kind === 'mine' ? closed : id}`;
-    const settle = (sid: string, kind: TextJob['kind'], closed: boolean, id?: string) => { const k = pendKey(sid, kind, closed, id); const t = pending.get(k); if (t) { clearTimeout(t); pending.delete(k); } };
     const say = (sid: string, cmd: string) => { (echoes.get(sid) ?? echoes.set(sid, new Set()).get(sid)!).add(cmd); void mu.sessions.send(cmd, sid); };
     const finishJob = (sid: string, ok: boolean) => {
       const j = textJobs.get(sid);
