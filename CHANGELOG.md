@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1
+
+- The read marks (`seen.tickets`, `seen.mine`) are declared in `contributes.storage.world`. The host now loads the synced world tier before activating, so after a reload a ticket that was already seen is not toasted again, and old tickets are not counted as unread.
+
 ## 2.0.0
 
 Needs μClient with extension API 1.12 or later.

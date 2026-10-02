@@ -1,6 +1,6 @@
 {
   "name": "@runmu.sh/ext-tickets",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "The staff ticket queue and the player's own tickets (My tickets), driven by GMCP Client.Tickets.*, by another extension through its API, or (My tickets) by parsing the game's @tickets text.",
   "keywords": [
     "tickets",
@@ -129,7 +129,13 @@
             }
           }
         }
-      ]
+      ],
+      "storage": {
+        "world": [
+          "seen.tickets",
+          "seen.mine"
+        ]
+      }
     },
     "capabilities": [
       "read-output",
