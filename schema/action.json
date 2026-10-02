@@ -1,0 +1,22 @@
+{
+  "$comment": "Client.Tickets.Action: claim, resolve, close, reopen, approve, deny, reply or withdraw.",
+  "type": "object",
+  "required": [
+    "action",
+    "id"
+  ],
+  "properties": {
+    "action": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    },
+    "internal": {
+      "type": "boolean"
+    }
+  }
+}

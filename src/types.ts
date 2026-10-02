@@ -1,22 +1,37 @@
 /**
- * The public types of @runmu.sh/ext-tickets (06-world-modules §2, §3, §6). Import them in another
- * extension with `import type { TicketsApi } from '@runmu.sh/ext-tickets/types'` and get the API with
- * `await ctx.api<TicketsApi>('@runmu.sh/ext-tickets')`.
+ * The public types of @runmu.sh/ext-tickets. Import them in another extension with
+ * `import type { TicketsApi } from '@runmu.sh/ext-tickets/types'` and get the API with
+ * `await ctx.api<TicketsApi>('tickets')` (or the package name). 2.0 keeps the 1.x API.
  */
 import type { Dispose } from '@muclient/sdk';
 
 /** A thread message. `origin` (optional) says who wrote it and only picks the look: staff messages take the accent rule. */
-export interface Message { text?: string; html?: string; sender?: string; visibility?: 'public' | 'internal'; origin?: 'staff' | 'player' | 'system'; platform?: string; ts?: number | string }
-export interface Bug { reporter?: string; location?: string; last_cmd?: string; traceback?: string; char_state?: string }
+export interface Message {
+  text?: string; html?: string; sender?: string; visibility?: 'public' | 'internal'; origin?: 'staff' | 'player' | 'system'; platform?: string; ts?: number | string;
+  /** Who should hear of it: `owner` (the requester: a "Staff replied" toast) or `assignee` (the claiming staff: "Player replied"). @since 2.0.0 */
+  audience?: 'owner' | 'assignee' | string;
+}
+/**
+ * A bug report. The 1.x fields, and since 2.0 Underspire's: `character`, `traceback_command` / `traceback_time`,
+ * `character_state` (an object), `available: false` for "No detailed bug report attached.".
+ */
+export interface Bug {
+  reporter?: string; location?: string; last_cmd?: string; traceback?: string; char_state?: string;
+  character?: string; traceback_command?: string; traceback_time?: string; character_state?: Record<string, unknown>; available?: boolean;
+}
 export interface Ticket {
   id: string; short_id?: string; kind?: string; label?: string;
   status?: 'open' | 'claimed' | 'resolved' | 'closed' | string;
   priority?: 0 | 1 | 2 | 3 | 4; subject?: string; requester_name?: string; account_name?: string; assignee?: string;
   age_mins?: number; preview?: string; context?: Record<string, string>; messages?: Message[]; bug?: Bug;
+  /** Last activity (epoch seconds or ms, or ISO). When present the age is counted from it and the queue sorts by it. @since 2.0.0 */
+  updated?: number | string;
+  /** True: Approve / Deny decide it; false: Resolve closes it (and the player may reply to reopen). Absent: all three. @since 2.0.0 */
+  approvable?: boolean;
 }
 export type Mode = 'off' | 'auto' | 'on';
 export type Via = 'command' | 'gmcp' | 'ext' | 'none';
-export interface ActionSession { sid: string; worldId: string; character: string; send(cmd: string): Promise<void>; gmcp(pkg: string, data?: unknown): Promise<boolean> }
+export interface ActionSession { sid: string; worldId: string; character: string; send(cmd: string): Promise<void>; gmcp(pkg: string, data?: unknown): Promise<boolean | 'reserved'> }
 /** What an action handler gets: the ticket's `id` and `short_id`, and `text` / `internal` for replies. */
 export interface ActionArgs { action: string; id: string; short_id: string; text?: string; internal?: string; [k: string]: string | undefined }
 /** Return true to mark the action handled (the configured action is skipped). */

@@ -1,0 +1,59 @@
+{
+  "$comment": "Client.Tickets.Message: one message for an open thread, with the ticket's new status.",
+  "type": "object",
+  "required": [
+    "id",
+    "message"
+  ],
+  "properties": {
+    "id": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "status": {
+      "type": "string"
+    },
+    "updated": {
+      "type": [
+        "number",
+        "string"
+      ]
+    },
+    "message": {
+      "$ref": "#/$defs/message"
+    }
+  },
+  "$defs": {
+    "message": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "html": {
+          "type": "string"
+        },
+        "sender": {
+          "type": "string"
+        },
+        "visibility": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "ts": {
+          "type": [
+            "number",
+            "string"
+          ]
+        }
+      }
+    }
+  }
+}

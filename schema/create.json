@@ -1,0 +1,15 @@
+{
+  "$comment": "Client.Tickets.Create: the player files a request.",
+  "type": "object",
+  "required": [
+    "text"
+  ],
+  "properties": {
+    "subject": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    }
+  }
+}

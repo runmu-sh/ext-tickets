@@ -1,0 +1,12 @@
+{
+  "$comment": "Client.Tickets.Mine (sent): ask for the player's own list, open or closed, optionally searched.",
+  "type": "object",
+  "properties": {
+    "closed": {
+      "type": "boolean"
+    },
+    "search": {
+      "type": "string"
+    }
+  }
+}

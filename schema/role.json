@@ -1,0 +1,12 @@
+{
+  "$comment": "Client.Tickets.Role: whether the character is staff.",
+  "type": "object",
+  "required": [
+    "staff"
+  ],
+  "properties": {
+    "staff": {
+      "type": "boolean"
+    }
+  }
+}

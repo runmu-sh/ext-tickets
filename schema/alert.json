@@ -1,0 +1,21 @@
+{
+  "$comment": "Client.Tickets.Alert: an unclaimed ticket has waited too long.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "label": {
+      "type": "string"
+    },
+    "who": {
+      "type": "string"
+    },
+    "age_mins": {
+      "type": "number"
+    }
+  }
+}

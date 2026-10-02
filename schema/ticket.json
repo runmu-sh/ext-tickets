@@ -1,0 +1,34 @@
+{
+  "$comment": "Client.Tickets.Thread / MyThread: one ticket, with its messages. Extra fields are allowed.",
+  "type": "object",
+  "required": ["id"],
+  "properties": {
+    "id": { "type": ["string", "integer"] },
+    "short_id": { "type": "string" },
+    "kind": { "type": "string" },
+    "label": { "type": "string" },
+    "status": { "type": "string" },
+    "priority": { "type": "integer" },
+    "subject": { "type": "string" },
+    "requester_name": { "type": "string" },
+    "account_name": { "type": "string" },
+    "assignee": { "type": ["string", "null"] },
+    "age_mins": { "type": "number" },
+    "updated": { "type": ["number", "string"] },
+    "approvable": { "type": "boolean" },
+    "preview": { "type": "string" },
+    "context": { "type": "object", "additionalProperties": { "type": ["string", "number", "boolean"] } },
+    "messages": { "type": "array", "items": { "$ref": "#/$defs/message" } },
+    "bug": { "type": "object" }
+  },
+  "$defs": {
+    "message": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" }, "html": { "type": "string" }, "sender": { "type": "string" },
+        "visibility": { "type": "string" }, "origin": { "type": "string" }, "platform": { "type": "string" },
+        "ts": { "type": ["number", "string"] }
+      }
+    }
+  }
+}

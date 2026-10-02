@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
- * Build src/index.ts into dist/index.js the way μClient bundles extensions (clients/web/build/muExtensions.ts
- * and the dev server): ESM, es2022, `vue`, `@muclient/sdk` and `@muclient/ui` external (the host's import
+ * Build src/index.ts into dist/index.js the way μClient bundles extensions: ESM, es2022, `vue`, `@muclient/sdk` and `@muclient/ui` external (the host's import
  * map supplies them), everything else bundled. Then check the `muclient` manifest with the host's rules.
  *
  *   node scripts/build.mjs            build + check

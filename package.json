@@ -1,6 +1,6 @@
 {
   "name": "@runmu.sh/ext-tickets",
-  "version": "1.2.1",
+  "version": "2.0.0",
   "description": "The staff ticket queue and the player's own tickets (My tickets), driven by GMCP Client.Tickets.*, by another extension through its API, or (My tickets) by parsing the game's @tickets text.",
   "keywords": [
     "tickets",
@@ -24,22 +24,23 @@
   "files": [
     "dist",
     "src/types.ts",
+    "src/text.ts",
+    "schema",
     "README.md",
-    "CHANGELOG.md",
-    "src/text.ts"
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/dev.mjs",
     "typecheck": "tsc --noEmit",
     "check": "node scripts/build.mjs --check",
-    "test": "node --experimental-strip-types --test \"tests/*.test.mjs\""
+    "test": "node --test \"tests/*.test.mjs\""
   },
   "devDependencies": {
-    "@muclient/sdk": "npm:@runmu.sh/sdk@^1.6.0",
-    "@runmu.sh/dev": "^0.1.0",
-    "@runmu.sh/ext-kit": "^1.0.0",
+    "@muclient/sdk": "npm:@runmu.sh/sdk@^1.12.0",
+    "@runmu.sh/dev": "^0.2.0",
     "esbuild": "^0.28.2",
+    "linkedom": "^0.18.13",
     "typescript": "^5.9.0"
   },
   "engines": {
@@ -47,7 +48,7 @@
   },
   "muclient": {
     "id": "tickets",
-    "api": "^1.5",
+    "api": "^1.12",
     "source": "src/index.ts",
     "displayName": "Tickets",
     "description": "The staff ticket queue and the player's own tickets (My tickets), driven by GMCP Client.Tickets.*, by another extension through its API, or (My tickets) by parsing the game's @tickets text.",
@@ -67,7 +68,67 @@
         }
       ],
       "gmcp": [
-        "Client.Tickets 1"
+        {
+          "package": "Client.Tickets 1",
+          "messages": {
+            "Client.Tickets.Role": {
+              "dir": "in",
+              "schema": "schema/role.json"
+            },
+            "Client.Tickets.Inbox": {
+              "dir": "in",
+              "schema": "schema/list.json"
+            },
+            "Client.Tickets.History": {
+              "dir": "in",
+              "schema": "schema/list.json"
+            },
+            "Client.Tickets.Thread": {
+              "dir": "in",
+              "schema": "schema/ticket.json"
+            },
+            "Client.Tickets.Message": {
+              "dir": "in",
+              "schema": "schema/message.json"
+            },
+            "Client.Tickets.Alert": {
+              "dir": "in",
+              "schema": "schema/alert.json"
+            },
+            "Client.Tickets.BugDetail": {
+              "dir": "in",
+              "schema": "schema/bugdetail.json"
+            },
+            "Client.Tickets.Mine": {
+              "dir": "in",
+              "schema": "schema/list.json"
+            },
+            "Client.Tickets.MyThread": {
+              "dir": "in",
+              "schema": "schema/ticket.json"
+            },
+            "Client.Tickets.Get": {
+              "dir": "out",
+              "schema": "schema/get.json"
+            },
+            "Client.Tickets.MyGet": {
+              "dir": "out",
+              "schema": "schema/get.json"
+            },
+            "Client.Tickets.List": {
+              "dir": "out",
+              "schema": "schema/list-request.json"
+            },
+            "Client.Tickets.Action": {
+              "dir": "out",
+              "schema": "schema/action.json"
+            },
+            "Client.Tickets.Create": {
+              "dir": "out",
+              "schema": "schema/create.json"
+            }
+          }
+        }
       ]
     },
     "capabilities": [

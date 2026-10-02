@@ -1,0 +1,21 @@
+{
+  "$comment": "Client.Tickets.BugDetail (in): the bug report behind a ticket. As a request (out) it is { id }.",
+  "type": "object",
+  "required": [
+    "id"
+  ],
+  "properties": {
+    "id": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "bug": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  }
+}

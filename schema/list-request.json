@@ -1,0 +1,12 @@
+{
+  "$comment": "Client.Tickets.List: ask for the closed list (History), optionally searched.",
+  "type": "object",
+  "properties": {
+    "history": {
+      "type": "boolean"
+    },
+    "search": {
+      "type": "string"
+    }
+  }
+}

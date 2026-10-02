@@ -1,0 +1,12 @@
+{
+  "$comment": "Client.Tickets.Get / MyGet: ask for one thread.",
+  "type": "object",
+  "required": [
+    "id"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    }
+  }
+}
